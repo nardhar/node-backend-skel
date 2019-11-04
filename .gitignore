@@ -1,0 +1,6 @@
+node_modules/
+.directory
+logs/
+src/config/database.json
+src/config/config.json
+sequelizeData.json

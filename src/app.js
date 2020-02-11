@@ -38,7 +38,7 @@ const start = (config) => {
   return new Promise((resolve) => {
     server.listen(port, () => {
       logger.info(`App running at port ${port}`);
-      resolve();
+      resolve({ server });
     });
   });
 };

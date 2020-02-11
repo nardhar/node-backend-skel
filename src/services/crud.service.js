@@ -6,7 +6,7 @@ const objectMinusProperty = (object, property) => {
   }, {});
 };
 
-const defaultFilter = (params, model) => {
+const defaultFilter = (model, params) => {
   // if there are associations on the query
   if (!params) return {};
 
@@ -24,10 +24,10 @@ const defaultFilter = (params, model) => {
         ...('required' in params[key] ? { required: params[key].required } : {}),
         // using the default filter again over the associated model
         ...defaultFilter(
-          // whether it is required or not then it should remove the "required" property
-          objectMinusProperty(params[key], 'required'),
           // sends the associated model for base of the new filter
           model.associations[key].target,
+          // whether it is required or not then it should remove the "required" property
+          objectMinusProperty(params[key], 'required'),
         ),
       });
       return whereResult;
@@ -46,6 +46,7 @@ const defaultFilter = (params, model) => {
     ...(include.length > 0 ? { include } : {}),
     // we manage the order globally
     ...('order' in params ? { order: params.order } : {}),
+    // adding the attributes
     ...('attributes' in params ? { attributes: params.attributes } : {}),
   };
 };
@@ -67,7 +68,7 @@ const validate = (instance, validationError) => {
   return validationError;
 };
 
-const validateWrapper = (service, model) => {
+const validateWrapper = (model) => {
   return (instance) => {
     return instance.validate()
     .then(() => {
@@ -77,7 +78,7 @@ const validateWrapper = (service, model) => {
       return new ValidationError(model.name, sequelizeValidationError);
     })
     .then((validationError) => {
-      return service.validate(instance, validationError);
+      return validate()(instance, validationError);
     })
     .then((validationError) => {
       if (validationError.hasErrors()) throw validationError;
@@ -94,25 +95,25 @@ const validateWrapper = (service, model) => {
  * @param {Integer} params.page Amount of offset pages(offset = limit * (page - 1))
  * @return {Object} Sequelize query param formatted
  */
-const filter = (service, model) => {
+const filter = (model) => {
   return (params) => {
     // builds the final object (it adds pagination here)
     return {
-      ...service.offsetLimit(params),
-      ...defaultFilter(params, model),
+      ...offsetLimit(params),
+      ...defaultFilter(model, params),
     };
   };
 };
 
-const list = (service, model) => {
+const list = (model) => {
   return (params) => {
-    return model.findAll(service.filter(params));
+    return model.findAll(filter(model)(params));
   };
 };
 
-const listAndCount = (service, model) => {
+const listAndCount = (model) => {
   return (params) => {
-    return model.findAndCountAll(service.filter(params));
+    return model.findAndCountAll(filter(model)(params));
   };
 };
 
@@ -137,15 +138,15 @@ const read = (model) => {
       }, {}),
     })
     .then((instance) => {
-      if (!instance) throw new NotFoundError(model.name, { id });
+      if (!instance) throw new NotFoundError(model.name, id);
       return instance;
     });
   };
 };
 
-const find = (service, model) => {
+const find = (model) => {
   return (params) => {
-    return model.findOne(service.filter(params))
+    return model.findOne(filter(model)(params))
     .then((instance) => {
       if (!instance) throw new NotFoundError(model.name, params);
       return instance;
@@ -159,18 +160,18 @@ const create = (model) => {
   };
 };
 
-const save = (service) => {
+const save = (model) => {
   return (params) => {
-    return service.validateWrapper(service.create(params))
+    return validateWrapper(model)(create(model)(params))
     .then((instance) => {
       return instance.save();
     });
   };
 };
 
-const edit = (service) => {
+const edit = (model) => {
   return (id, params) => {
-    return service.read(id)
+    return read(model)(id)
     .then((instance) => {
       instance.set(params);
       return instance;
@@ -178,92 +179,61 @@ const edit = (service) => {
   };
 };
 
-const update = (service) => {
+const update = (model) => {
   return (id, params) => {
-    return service.edit(id, params)
-    .then(service.validateWrapper)
+    return edit(model)(id, params)
+    .then(validateWrapper(model))
     .then((instance) => {
       return instance.save();
     });
   };
 };
 
-const deleteMethod = (service) => {
+// since delete is a reserved keyword, then we use another name for function definition
+const deleteMethod = (model) => {
   return (id) => {
-    return service.read(id)
+    return read(model)(id)
     .then((instance) => {
       return instance.destroy();
     });
   };
 };
 
-// builder for one model and easy overwrite of methods
-module.exports = (model) => {
-  const service = {
+// service builder for further simple reuse (methods could be ovewritten)
+const crudService = (model) => {
+  return {
     offsetLimit,
     validate,
-  };
-
-  service.validateWrapper = validateWrapper(service, model);
-  service.filter = filter(service, model);
-  service.list = list(service, model);
-  service.listAndCount = listAndCount(service, model);
-  service.read = read(model);
-  service.find = find(service, model);
-  service.create = create(model);
-  service.save = save(service);
-  service.edit = edit(service);
-  service.update = update(service);
-  service.delete = deleteMethod(service);
-
-  return service;
-};
-
-// enabling easy usage of service methods
-module.exports.offsetLimit = offsetLimit;
-module.exports.validate = validate;
-module.exports.validateWrapper = (model) => {
-  return validateWrapper({ validate }, model);
-};
-module.exports.filter = (model) => {
-  return filter({ offsetLimit }, model);
-};
-module.exports.list = (model) => {
-  return list({
-    filter: filter({ offsetLimit }, model),
-  }, model);
-};
-module.exports.listAndCount = (model) => {
-  return listAndCount({
-    filter: filter({ offsetLimit }, model),
-  }, model);
-};
-module.exports.read = read;
-module.exports.find = (model) => {
-  return find({
-    filter: filter({ offsetLimit }, model),
-  }, model);
-};
-module.exports.create = create;
-module.exports.save = (model) => {
-  return save({
-    validateWrapper: validateWrapper({ validate }, model),
+    validateWrapper: validateWrapper(model),
+    filter: filter(model),
+    list: list(model),
+    listAndCount: listAndCount(model),
+    read: read(model),
+    find: find(model),
     create: create(model),
-  });
+    save: save(model),
+    edit: edit(model),
+    update: update(model),
+    delete: deleteMethod(model),
+    // aliases
+    obtener: read(model),
+    listar: list(model),
+  };
 };
-module.exports.edit = (model) => {
-  return edit({
-    read: read(model),
-  });
-};
-module.exports.update = (model) => {
-  return update({
-    edit: edit({ read: read(model) }),
-    validateWrapper: validateWrapper({ validate }, model),
-  });
-};
-module.exports.delete = (model) => {
-  return deleteMethod({
-    read: read(model),
-  });
-};
+
+// enabling methods for simple use without needing to build a complete service object
+crudService.offsetLimit = offsetLimit;
+crudService.validate = validate;
+crudService.validateWrapper = validateWrapper;
+crudService.filter = filter;
+crudService.list = list;
+crudService.listAndCount = listAndCount;
+crudService.read = read;
+crudService.find = find;
+crudService.create = create;
+crudService.save = save;
+crudService.edit = edit;
+crudService.update = update;
+crudService.delete = deleteMethod;
+
+module.exports = crudService;

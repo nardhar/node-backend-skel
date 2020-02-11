@@ -40,13 +40,34 @@ class ValidationError extends ApiError {
   }
 
   getBody() {
-    return this.data.map((error) => {
+    return this.data.map((fieldError) => {
       return {
-        field: error.field,
-        code: `${this.objectName}.${error.field}.${error.code}`,
-        args: error.args,
+        field: fieldError.field,
+        code: `${this.objectName}.${fieldError.field}.${fieldError.code}.error`,
+        ...(
+          Array.isArray(fieldError.args) && fieldError.args.length > 0
+            ? { value: fieldError.args[0] } : {}
+        ),
+        ...(!Array.isArray(fieldError.args) ? { value: fieldError.args } : {}),
       };
     });
+  }
+
+
+  static asyncBuild(objectName, errors) {
+    return Promise.resolve()
+    .then(() => {
+      return new ValidationError(objectName, errors);
+    });
+  }
+
+  static handle(params) {
+    return (validationError) => {
+      if (validationError.hasErrors()) {
+        throw validationError;
+      }
+      return params;
+    };
   }
 }
 
